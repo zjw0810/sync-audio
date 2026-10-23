@@ -1,0 +1,14 @@
+node_modules/
+uploads/*
+!uploads/.gitkeep
+*.mp3
+*.wav
+*.pcm
+*.raw
+*.log
+.env
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/

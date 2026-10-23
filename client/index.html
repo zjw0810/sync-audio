@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>sync-audio · 加入同步播放</title>
+  <meta name="theme-color" content="#e9eae4" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)" />
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #e9eae4;
+      --ink: #15181a;
+      --muted: #5d675f;
+      --rule: #c3c7bd;
+      --signal: #17614f;
+      --alert: #a63a27;
+      --warn: #8f6516;
+      --cell: #d5d8cf;
+      --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", "Noto Serif CJK SC", serif;
+      --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --paper: #14171a;
+        --ink: #e7e8e1;
+        --muted: #98a39b;
+        --rule: #333a36;
+        --signal: #5cbfa2;
+        --alert: #e08a72;
+        --warn: #d6a85a;
+        --cell: #242a27;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+    }
+
+    body {
+      min-height: 100svh;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .shell {
+      max-width: 660px;
+      margin: 0 auto;
+      padding: clamp(26px, 5vw, 60px) clamp(20px, 5vw, 40px) clamp(32px, 6vw, 56px);
+      display: flex;
+      flex-direction: column;
+      gap: clamp(26px, 4.5vw, 40px);
+    }
+
+    .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .wordmark {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex: none;
+    }
+
+    .dot[data-state="connecting"] {
+      background: var(--warn);
+    }
+
+    .dot[data-state="live"] {
+      background: var(--signal);
+    }
+
+    .dot[data-state="error"] {
+      background: var(--alert);
+    }
+
+    .intro h1 {
+      margin: 0 0 16px;
+      font-family: var(--serif);
+      font-weight: 600;
+      font-size: clamp(2rem, 6vw, 2.9rem);
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      text-wrap: balance;
+    }
+
+    .lede {
+      margin: 0;
+      max-width: 32em;
+      color: var(--muted);
+    }
+
+    .action {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .join {
+      appearance: none;
+      border: 1px solid var(--ink);
+      border-radius: 2px;
+      background: var(--ink);
+      color: var(--paper);
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1;
+      padding: 17px 32px;
+      min-height: 52px;
+      cursor: pointer;
+      transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+    }
+
+    .join[data-joined="true"] {
+      background: transparent;
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    .join:disabled {
+      opacity: 0.55;
+      cursor: progress;
+    }
+
+    .join:focus-visible {
+      outline: 2px solid var(--signal);
+      outline-offset: 3px;
+    }
+
+    @media (hover: hover) {
+      .join:hover:not(:disabled) {
+        background: var(--signal);
+        border-color: var(--signal);
+        color: var(--paper);
+      }
+
+      .join[data-joined="true"]:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--ink) 9%, transparent);
+        border-color: var(--ink);
+        color: var(--ink);
+      }
+    }
+
+    .note {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+      max-width: 34em;
+    }
+
+    .error {
+      margin: 4px 0 0;
+      padding: 10px 14px;
+      border-left: 3px solid var(--alert);
+      color: var(--alert);
+      font-size: 0.88rem;
+      max-width: 38em;
+    }
+
+    .buffer {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .row-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .label {
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    .count {
+      font-family: var(--mono);
+      font-size: 0.86rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .strip {
+      display: grid;
+      grid-template-columns: repeat(16, 1fr);
+      gap: 3px;
+      height: 28px;
+      align-items: end;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .cell {
+      height: 100%;
+      background: var(--cell);
+      border-radius: 1px;
+      transition: background-color 0.12s linear;
+    }
+
+    .cell.on {
+      background: var(--signal);
+    }
+
+    .readouts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: clamp(14px, 3vw, 30px);
+    }
+
+    .readout {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .readout .value {
+      display: block;
+      margin-top: 4px;
+      font-family: var(--mono);
+      font-size: clamp(1.35rem, 4vw, 1.75rem);
+      line-height: 1.25;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+
+    .readout .value small {
+      margin-left: 3px;
+      font-size: 0.5em;
+      color: var(--muted);
+    }
+
+    .sub {
+      display: block;
+      margin-top: 2px;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    #residual-text[data-state="alert"] {
+      color: var(--alert);
+    }
+
+    #clock-detail {
+      white-space: pre-line;
+    }
+
+    .foot {
+      padding-top: 16px;
+      border-top: 1px solid var(--rule);
+    }
+
+    .foot p {
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      max-width: 40em;
+    }
+
+    .tune {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-top: 18px;
+      border-top: 1px solid var(--rule);
+    }
+
+    .output-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .select {
+      flex: 1;
+      min-width: 0;
+      font: inherit;
+      font-size: 0.86rem;
+      color: var(--ink);
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      padding: 8px 10px;
+    }
+
+    .select:focus-visible {
+      outline: 2px solid var(--signal);
+      outline-offset: 2px;
+    }
+
+    .ghost {
+      appearance: none;
+      font: inherit;
+      font-size: 0.82rem;
+      color: var(--ink);
+      background: transparent;
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      padding: 8px 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .ghost:focus-visible {
+      outline: 2px solid var(--signal);
+      outline-offset: 2px;
+    }
+
+    @media (hover: hover) {
+      .ghost:hover {
+        border-color: var(--ink);
+      }
+    }
+
+    .slider {
+      width: 100%;
+      margin: 0;
+      height: 28px;
+      accent-color: var(--signal);
+      cursor: pointer;
+    }
+
+    .slider:focus-visible {
+      outline: 2px solid var(--signal);
+      outline-offset: 4px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <span class="wordmark">sync-audio</span>
+      <span class="status">
+        <i class="dot" id="status-dot" data-state="idle"></i>
+        <span id="status-text" aria-live="polite">未加入</span>
+      </span>
+    </header>
+
+    <section class="intro">
+      <h1>把这一台设备，<br />调进同一秒。</h1>
+      <p class="lede">
+        主机把这台电脑正在播放的声音（音乐、视频、游戏）实时切成 20ms 的 PCM 块广播出来，这台设备按每块的时间戳排进音频时钟。
+        加入后，它与房间里其他设备落在同一条时间线上。
+      </p>
+    </section>
+
+    <section class="action">
+      <button class="join" id="join-button" type="button">加入同步</button>
+      <p class="note">需要与主机在同一局域网。首次加入时，浏览器会启用本页的音频播放。</p>
+      <p class="error" id="error-box" role="alert" hidden></p>
+    </section>
+
+    <section class="buffer" aria-label="缓冲队列">
+      <div class="row-head">
+        <span class="label">缓冲队列</span>
+        <span class="count" id="buffer-count">0 块</span>
+      </div>
+      <div class="strip" id="buffer-strip" aria-hidden="true"></div>
+    </section>
+
+    <section class="readouts">
+      <div class="readout">
+        <span class="label">已播放块数</span>
+        <span class="value" id="played-count">0</span>
+        <span class="sub" id="seq-text">seq —</span>
+      </div>
+      <div class="readout">
+        <span class="label">音频时钟</span>
+        <span class="value"><span id="clock-text">0.000</span><small>s</small></span>
+        <span class="sub" id="diagnostics">迟到 0，断点 0</span>
+      </div>
+      <div class="readout">
+        <span class="label">时钟偏移残余</span>
+        <span class="value"><span id="residual-text">—</span><small>ms</small></span>
+        <span class="sub" id="clock-detail">等待 NTP 握手</span>
+      </div>
+    </section>
+
+    <section class="tune" aria-label="手动延迟微调">
+      <div class="row-head">
+        <label class="label" for="manual-range">手动延迟</label>
+        <span class="count" id="manual-value">0 ms</span>
+      </div>
+      <input
+        class="slider"
+        id="manual-range"
+        type="range"
+        min="-200"
+        max="200"
+        step="1"
+        value="0"
+        aria-describedby="manual-hint"
+      />
+      <p class="note" id="manual-hint">负值让本机的声音更早，正值更晚。和主机扬声器对齐时，从 0 往左微调即可。</p>
+    </section>
+
+    <section class="tune" aria-label="本机输出设备">
+      <div class="row-head">
+        <label class="label" for="output-select">本机输出</label>
+        <span class="count" id="output-name">默认设备</span>
+      </div>
+      <div class="output-row">
+        <select class="select" id="output-select">
+          <option value="">默认输出</option>
+        </select>
+        <button class="ghost" id="output-refresh" type="button">刷新设备</button>
+        <button class="ghost" id="output-test" type="button">试听</button>
+      </div>
+      <p class="note" id="output-state">未加入</p>
+      <p class="note" id="output-hint">主机把默认输出设成虚拟声卡（如 CABLE Input）时，用这里把收到的延迟声音放回真实声卡。首次刷新会请求一次麦克风权限，仅用于显示设备名称。</p>
+    </section>
+
+    <footer class="foot">
+      <p>保持这一页在前台：切到后台标签页后定时器会被节流，缓冲耗尽，声音就会停。</p>
+    </footer>
+  </main>
+
+  <noscript>本页需要启用 JavaScript 才能播放音频。</noscript>
+  <script type="module" src="js/ui.js"></script>
+</body>
+</html>
