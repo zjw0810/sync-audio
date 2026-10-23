@@ -19,6 +19,12 @@ const els = {
   settingsOk: document.getElementById('settings-ok'),
   savePassword: document.getElementById('save-password'),
   logout: document.getElementById('logout'),
+  trackName: document.getElementById('track-name'),
+  trackMeta: document.getElementById('track-meta'),
+  prevTrack: document.getElementById('prev-track'),
+  nextTrack: document.getElementById('next-track'),
+  uploadTrack: document.getElementById('upload-track'),
+  trackFile: document.getElementById('track-file'),
 };
 
 let sharing = false;
@@ -81,6 +87,73 @@ async function loadSettings() {
   }
 }
 
+async function loadNowPlaying() {
+  const data = await request('/api/admin/now-playing');
+  if (!data) return;
+
+  if (data.mode === 'file' && data.filename) {
+    els.trackName.textContent = data.filename;
+    els.trackMeta.textContent = `第 ${data.index + 1} / ${data.total} 首`;
+  } else if (data.mode === 'system') {
+    els.trackName.textContent = '本机声音';
+    els.trackMeta.textContent = data.total ? `曲库 ${data.total} 首` : '曲库为空，可上传曲目';
+  } else {
+    els.trackName.textContent = '未播放';
+    els.trackMeta.textContent = data.total ? `曲库 ${data.total} 首` : '曲库为空，可上传曲目';
+  }
+}
+
+async function skip(direction) {
+  els.prevTrack.disabled = true;
+  els.nextTrack.disabled = true;
+
+  try {
+    await request(`/api/admin/player/${direction}`, { method: 'POST' });
+    await loadNowPlaying();
+  } catch (err) {
+    els.trackMeta.textContent = err.message;
+  } finally {
+    els.prevTrack.disabled = false;
+    els.nextTrack.disabled = false;
+  }
+}
+
+async function uploadSelected(file) {
+  if (!file) return;
+
+  const original = els.uploadTrack.textContent;
+  els.uploadTrack.disabled = true;
+  els.uploadTrack.textContent = '上传中…';
+
+  try {
+    const form = new FormData();
+    form.append('file', file);
+
+    const response = await fetch('/upload', {
+      method: 'POST',
+      body: form,
+      credentials: 'same-origin',
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '上传失败');
+
+    await fetch('/play', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: data.filename }),
+    });
+
+    await loadNowPlaying();
+  } catch (err) {
+    els.trackMeta.textContent = err.message;
+  } finally {
+    els.uploadTrack.disabled = false;
+    els.uploadTrack.textContent = original;
+    els.trackFile.value = '';
+  }
+}
+
 async function login() {
   els.loginButton.disabled = true;
   els.loginError.hidden = true;
@@ -97,7 +170,13 @@ async function login() {
 
     showPanel();
     await loadSettings();
-    if (!pollTimer) pollTimer = setInterval(() => loadSettings().catch(() => {}), 5000);
+    await loadNowPlaying();
+    if (!pollTimer) {
+      pollTimer = setInterval(() => {
+        loadSettings().catch(() => {});
+        loadNowPlaying().catch(() => {});
+      }, 5000);
+    }
   } catch (err) {
     els.loginError.textContent = err.message;
     els.loginError.hidden = false;
@@ -159,7 +238,11 @@ async function bootstrap() {
     if (data && data.role === 'admin') {
       showPanel();
       await loadSettings();
-      pollTimer = setInterval(() => loadSettings().catch(() => {}), 5000);
+      await loadNowPlaying();
+      pollTimer = setInterval(() => {
+        loadSettings().catch(() => {});
+        loadNowPlaying().catch(() => {});
+      }, 5000);
       return;
     }
   } catch {
@@ -179,6 +262,23 @@ els.shareToggle.addEventListener('click', () => {
 
 els.refresh.addEventListener('click', () => {
   loadSettings().catch((err) => console.error(err));
+  loadNowPlaying().catch((err) => console.error(err));
+});
+
+els.prevTrack.addEventListener('click', () => {
+  skip('prev').catch((err) => console.error(err));
+});
+
+els.nextTrack.addEventListener('click', () => {
+  skip('next').catch((err) => console.error(err));
+});
+
+els.uploadTrack.addEventListener('click', () => {
+  els.trackFile.click();
+});
+
+els.trackFile.addEventListener('change', () => {
+  uploadSelected(els.trackFile.files && els.trackFile.files[0]).catch((err) => console.error(err));
 });
 
 els.savePassword.addEventListener('click', () => {

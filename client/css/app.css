@@ -390,6 +390,51 @@ body {
   letter-spacing: -0.01em;
 }
 
+.card-wide {
+  grid-column: 1 / -1;
+}
+
+.now-playing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.now-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.now-label {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.now-meta strong {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.now-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.now-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .kv {
   margin: 0;
   display: flex;

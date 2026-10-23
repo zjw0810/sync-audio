@@ -1,6 +1,6 @@
 {
   "name": "sync-audio",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "局域网多设备同步播放本地音频（HTTP + WebSocket + PCM 广播）",
   "main": "server/index.js",

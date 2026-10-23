@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-10-23
+
+### 新增
+
+- **播放控制（主机控制台）**：显示当前曲目与序号，支持上一首/下一首、上传曲目（上传后立即播放）。
+- **自动连播**：曲目播完自动切换到下一首；曲库为空或出错时回到本机声音共享。
+- **曲目接口**：`GET /api/admin/now-playing`、`POST /api/admin/player/next`、`POST /api/admin/player/prev`。
+
 ## [0.2.1] - 2026-10-23
 
 ### 修复

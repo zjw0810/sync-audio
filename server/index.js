@@ -153,6 +153,69 @@ function requireAdmin(req, res) {
   return session;
 }
 
+function requireSession(req, res) {
+  const session = readSession(req);
+  if (!session) {
+    sendJson(res, 401, { error: '请先加入房间' });
+    return null;
+  }
+  return session;
+}
+
+// ---------------------------------------------------------------------------
+// 播放列表
+// ---------------------------------------------------------------------------
+
+const TRACK_PATTERN = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
+
+function listTracks() {
+  try {
+    return fs
+      .readdirSync(UPLOAD_DIR)
+      .filter((name) => TRACK_PATTERN.test(name))
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  } catch {
+    return [];
+  }
+}
+
+function nowPlaying() {
+  const tracks = listTracks();
+  const isFile = broadcaster.sourceKind === 'file';
+  const index = isFile ? tracks.indexOf(broadcaster.filename) : -1;
+
+  return {
+    mode: isFile ? 'file' : broadcaster.playing ? 'system' : 'idle',
+    filename: isFile ? broadcaster.filename : null,
+    index,
+    total: tracks.length,
+    playing: broadcaster.playing,
+  };
+}
+
+/** 切到上一首/下一首；当前不是文件播放时，下一首从第一首开始，上一首从最后一首开始 */
+async function playAdjacent(direction) {
+  const tracks = listTracks();
+  if (tracks.length === 0) {
+    throw new HttpError(404, '曲库为空，请先上传音乐');
+  }
+
+  const isFile = broadcaster.sourceKind === 'file';
+  const current = isFile ? tracks.indexOf(broadcaster.filename) : -1;
+
+  let next;
+  if (current === -1) {
+    next = direction > 0 ? 0 : tracks.length - 1;
+  } else {
+    next = (current + direction + tracks.length) % tracks.length;
+  }
+
+  const filename = tracks[next];
+  await broadcaster.play(path.join(UPLOAD_DIR, filename), filename);
+  log('PLAY', `切换曲目 -> ${filename}（${next + 1}/${tracks.length}）`);
+  return { filename, index: next, total: tracks.length };
+}
+
 // ---------------------------------------------------------------------------
 // 日志
 // ---------------------------------------------------------------------------
@@ -851,6 +914,27 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
+  if (pathname === '/api/admin/now-playing') {
+    if (!requireAdmin(req, res)) return;
+    sendJson(res, 200, nowPlaying());
+    return;
+  }
+
+  if (pathname === '/api/admin/player/next' || pathname === '/api/admin/player/prev') {
+    if (!requireAdmin(req, res)) return;
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
+      return;
+    }
+    try {
+      const result = await playAdjacent(pathname.endsWith('next') ? 1 : -1);
+      sendJson(res, 200, { ok: true, ...result });
+    } catch (err) {
+      sendJson(res, err instanceof HttpError ? err.statusCode : 500, { error: err.message });
+    }
+    return;
+  }
+
   if (pathname === '/api/admin/share') {
     if (!requireAdmin(req, res)) return;
     if (req.method !== 'POST') {
@@ -1052,6 +1136,17 @@ broadcaster.on('end', (info) => {
 
   if (info.error) logError('PLAY', `${info.filename} 播放失败: ${info.error.message}`);
   else log('PLAY', `${info.filename} 播放完成，共 ${info.seq} 块`);
+
+  // 文件播完：还有曲目就自动下一首，否则回到本机声音共享
+  if (!info.error && info.kind === 'file' && listTracks().length > 0 && !shuttingDown) {
+    setTimeout(() => {
+      playAdjacent(1).catch((err) => {
+        logError('PLAY', `自动切换下一首失败: ${err.message}`);
+        startSystemShare('after-file');
+      });
+    }, 300);
+    return;
+  }
 
   // 文件播完后回到共享本机声音
   if (!shuttingDown) {

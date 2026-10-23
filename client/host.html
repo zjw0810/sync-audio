@@ -87,6 +87,22 @@
               <button class="btn ghost" id="logout" type="button">退出登录</button>
             </div>
           </article>
+          <article class="card card-wide">
+            <h2>播放控制</h2>
+            <div class="now-playing">
+              <div class="now-meta">
+                <span class="now-label">正在播放</span>
+                <strong id="track-name">—</strong>
+                <span class="now-sub" id="track-meta">—</span>
+              </div>
+              <div class="now-actions">
+                <button class="btn ghost" id="prev-track" type="button">上一首</button>
+                <button class="btn ghost" id="next-track" type="button">下一首</button>
+                <button class="btn primary" id="upload-track" type="button">上传曲目</button>
+                <input id="track-file" type="file" accept=".mp3,.wav,.m4a,.aac,.flac,.ogg" hidden />
+              </div>
+            </div>
+          </article>
         </div>
       </section>
     </main>

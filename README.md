@@ -7,7 +7,7 @@
 界面分为两个入口：
 
 - **客户端**（`/`）：输入房间密码加入，只保留时钟偏移和手动延迟两项控制。
-- **主机控制台**（`/host`）：输入管理密码登录，查看运行状态、启停共享、修改房间密码。
+- **主机控制台**（`/host`）：输入管理密码登录，查看运行状态、启停共享、修改房间密码，以及播放控制（当前曲目、上一首/下一首、上传曲目）。
 
 ![客户端界面](docs/screenshot.png)
 
@@ -17,6 +17,7 @@
 - **房间密码**：客户端必须输入正确的房间密码才能接入音频，密码随机会话、12 小时有效。
 - **管理密码**：`/host` 控制台独立鉴权，房间密码与共享开关只有管理员能改。
 - **MP3 播放**：上传后由 FFmpeg 流式解码为 PCM，按实时节拍广播。
+- **曲目控制**：控制台显示当前曲名与序号，支持上一首/下一首、上传即播，播完自动切下一首。
 - **时钟同步**：5 次握手取中位数，之后每 30 秒用 RTT 最小样本渐进重校，抵消晶振漂移。
 - **精确排程**：20ms 块 + `scheduledTime`，局域网内多设备对齐在毫秒级。
 - **自适应抖动缓冲**：按丢块情况自动调整排程提前量，公网抖动时自动加深缓冲。
@@ -128,6 +129,9 @@ curl.exe -b cookies.txt -X POST -H "Content-Type: application/json" -d '{"filena
 | `GET` | `/api/admin/settings` | 管理员 | 采集设备、在线数、共享状态、房间密码 |
 | `POST` | `/api/admin/settings` | 管理员 | `{"roomPassword":"..."}`，修改后踢掉所有房间会话 |
 | `POST` | `/api/admin/share` | 管理员 | `{"enabled":true|false}` 启停共享 |
+| `GET` | `/api/admin/now-playing` | 管理员 | 当前曲目、序号、总数、模式（file/system/idle） |
+| `POST` | `/api/admin/player/next` | 管理员 | 下一首（当前为本机声音时从第一首开始） |
+| `POST` | `/api/admin/player/prev` | 管理员 | 上一首（当前为本机声音时从最后一首开始） |
 | `POST` | `/upload` | 管理员 | multipart 字段 `file`，返回 `{"filename":"..."}` |
 | `POST` | `/play` | 管理员 | JSON `{"filename":"..."}` |
 | `GET` | `/status` | 管理员 | `{sharing, kind, device, clients, level, ffmpeg}` |
