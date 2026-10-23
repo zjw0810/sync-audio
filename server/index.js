@@ -41,6 +41,119 @@ const MAX_PART_HEADER_BYTES = 16 * 1024;
 let ffmpegStatus = { ok: false, error: 'ffmpeg 尚未初始化' };
 
 // ---------------------------------------------------------------------------
+// 房间密码 / 管理密码 / 会话
+// ---------------------------------------------------------------------------
+
+const SETTINGS_DIR = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'sync-audio');
+const SETTINGS_PATH = path.join(SETTINGS_DIR, 'settings.json');
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function randomRoomPassword() {
+  return String(100000 + Math.floor(Math.random() * 900000));
+}
+
+function loadAuthSettings() {
+  let saved = {};
+  try {
+    saved = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8')) || {};
+  } catch {
+    saved = {};
+  }
+
+  const settings = {
+    roomPassword:
+      process.env.ROOM_PASSWORD || saved.roomPassword || randomRoomPassword(),
+    adminPassword:
+      process.env.ADMIN_PASSWORD ||
+      saved.adminPassword ||
+      crypto.randomBytes(6).toString('hex'),
+  };
+
+  try {
+    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+  } catch (err) {
+    logError('SYS', `保存密码设置失败: ${err.message}`);
+  }
+
+  return settings;
+}
+
+const authSettings = loadAuthSettings();
+const sessions = new Map(); // token -> { role, expires }
+
+function saveAuthSettings() {
+  try {
+    fs.mkdirSync(SETTINGS_DIR, { recursive: true });
+    fs.writeFileSync(
+      SETTINGS_PATH,
+      JSON.stringify(
+        { roomPassword: authSettings.roomPassword, adminPassword: authSettings.adminPassword },
+        null,
+        2,
+      ),
+    );
+  } catch (err) {
+    logError('SYS', `保存密码设置失败: ${err.message}`);
+  }
+}
+
+function safeEqual(a, b) {
+  const left = Buffer.from(String(a));
+  const right = Buffer.from(String(b));
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+function createSession(role) {
+  const token = crypto.randomBytes(18).toString('base64url');
+  sessions.set(token, { role, expires: Date.now() + SESSION_TTL_MS });
+  return token;
+}
+
+function readSession(req) {
+  const cookie = req.headers.cookie || '';
+  const match = /(?:^|;\s*)sync_session=([^;]+)/.exec(cookie);
+  if (!match) return null;
+
+  const token = decodeURIComponent(match[1]);
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (session.expires < Date.now()) {
+    sessions.delete(token);
+    return null;
+  }
+  session.token = token;
+  return session;
+}
+
+function setSessionCookie(res, token) {
+  res.setHeader(
+    'Set-Cookie',
+    `sync_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+  );
+}
+
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', 'sync_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+}
+
+function destroySession(req) {
+  const session = readSession(req);
+  if (session) sessions.delete(session.token);
+  return session;
+}
+
+function requireAdmin(req, res) {
+  const session = readSession(req);
+  if (!session || session.role !== 'admin') {
+    sendJson(res, 401, { error: '需要管理员密码' });
+    return null;
+  }
+  return session;
+}
+
+// ---------------------------------------------------------------------------
 // 日志
 // ---------------------------------------------------------------------------
 
@@ -643,6 +756,123 @@ async function handlePlay(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// API：登录 / 房间 / 管理设置
+// ---------------------------------------------------------------------------
+
+async function handleApi(req, res, pathname) {
+  if (pathname === '/api/session') {
+    const session = readSession(req);
+    sendJson(res, 200, { role: session ? session.role : null });
+    return;
+  }
+
+  if (pathname === '/api/join') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
+      return;
+    }
+    const body = await readJsonBody(req);
+    if (!safeEqual(body.password || '', authSettings.roomPassword)) {
+      sendJson(res, 401, { error: '房间密码错误' });
+      return;
+    }
+    setSessionCookie(res, createSession('room'));
+    log('AUTH', '有客户端加入房间');
+    sendJson(res, 200, { role: 'room' });
+    return;
+  }
+
+  if (pathname === '/api/admin/login') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
+      return;
+    }
+    const body = await readJsonBody(req);
+    if (!safeEqual(body.password || '', authSettings.adminPassword)) {
+      sendJson(res, 401, { error: '管理密码错误' });
+      return;
+    }
+    setSessionCookie(res, createSession('admin'));
+    log('AUTH', '管理员已登录');
+    sendJson(res, 200, { role: 'admin' });
+    return;
+  }
+
+  if (pathname === '/api/admin/logout') {
+    destroySession(req);
+    clearSessionCookie(res);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (pathname === '/api/admin/settings') {
+    if (!requireAdmin(req, res)) return;
+
+    if (req.method === 'GET') {
+      sendJson(res, 200, {
+        device: broadcaster.deviceName || null,
+        sharing: broadcaster.playing,
+        clients: clients.size,
+        roomPassword: authSettings.roomPassword,
+      });
+      return;
+    }
+
+    if (req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const next = String(body.roomPassword || '').trim();
+      if (next.length < 4 || next.length > 32) {
+        sendJson(res, 400, { error: '房间密码需为 4–32 个字符' });
+        return;
+      }
+
+      authSettings.roomPassword = next;
+      saveAuthSettings();
+
+      for (const [token, session] of sessions) {
+        if (session.role === 'room') sessions.delete(token);
+      }
+      for (const socket of clients.values()) {
+        if (socket.authRole === 'room') {
+          try {
+            socket.close(4001, 'password changed');
+          } catch {
+            /* 忽略 */
+          }
+        }
+      }
+
+      log('AUTH', '房间密码已更新，原有客户端需要重新加入');
+      sendJson(res, 200, { ok: true, roomPassword: next });
+      return;
+    }
+
+    sendJson(res, 405, { error: '不支持的方法' });
+    return;
+  }
+
+  if (pathname === '/api/admin/share') {
+    if (!requireAdmin(req, res)) return;
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    if (body.enabled === false) {
+      await broadcaster.stop('管理员停止共享');
+      sendJson(res, 200, { sharing: false });
+    } else {
+      await startSystemShare('admin');
+      sendJson(res, 200, { sharing: broadcaster.playing });
+    }
+    return;
+  }
+
+  sendJson(res, 404, { error: '接口不存在' });
+}
+
+// ---------------------------------------------------------------------------
 // HTTP 路由
 // ---------------------------------------------------------------------------
 
@@ -661,11 +891,21 @@ const server = http.createServer((req, res) => {
   });
 
   try {
+    if (pathname.startsWith('/api/')) {
+      handleApi(req, res, pathname).catch((err) => {
+        logError('API', `处理失败: ${err.message}`);
+        if (!res.headersSent) sendJson(res, 500, { error: '服务器错误' });
+        else res.destroy();
+      });
+      return;
+    }
+
     if (pathname === '/upload') {
       if (req.method !== 'POST') {
         sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
         return;
       }
+      if (!requireAdmin(req, res)) return;
       handleUpload(req, res).catch((err) => {
         logError('UPLOAD', `未捕获异常: ${err.stack || err.message}`);
         if (!res.headersSent) sendJson(res, 500, { error: '上传处理失败' });
@@ -679,6 +919,7 @@ const server = http.createServer((req, res) => {
         sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
         return;
       }
+      if (!requireAdmin(req, res)) return;
       handlePlay(req, res).catch((err) => {
         logError('PLAY', `未捕获异常: ${err.stack || err.message}`);
         if (!res.headersSent) sendJson(res, 500, { error: '播放请求处理失败' });
@@ -692,6 +933,7 @@ const server = http.createServer((req, res) => {
         sendJson(res, 405, { error: '仅支持 GET' }, { Allow: 'GET' });
         return;
       }
+      if (!requireAdmin(req, res)) return;
       sendJson(res, 200, {
         sharing: broadcaster.playing,
         kind: broadcaster.sourceKind || null,
@@ -701,6 +943,10 @@ const server = http.createServer((req, res) => {
         ffmpeg: ffmpegStatus.ok,
       });
       return;
+    }
+
+    if (pathname === '/host') {
+      req.url = '/host.html';
     }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -815,7 +1061,14 @@ broadcaster.on('end', (info) => {
 });
 
 wss.on('connection', (socket, req) => {
+  const session = readSession(req);
+  if (!session) {
+    socket.close(4001, 'unauthorized');
+    return;
+  }
+
   const id = nextClientId++;
+  socket.authRole = session.role;
   const remoteAddress = req.socket.remoteAddress || 'unknown';
   const remotePort = req.socket.remotePort || 0;
   const remote = `${remoteAddress}:${remotePort}`;
@@ -918,6 +1171,10 @@ function printBanner() {
   }
   log('SYS', `静态目录: ${CLIENT_DIR}`);
   log('SYS', `上传目录: ${UPLOAD_DIR}`);
+  log('SYS', `房间密码: ${authSettings.roomPassword}`);
+  log('SYS', `管理密码: ${authSettings.adminPassword}`);
+  log('SYS', `主机控制台: http://localhost:${PORT}/host`);
+  log('SYS', `客户端页面: http://localhost:${PORT}/`);
 }
 
 async function start() {

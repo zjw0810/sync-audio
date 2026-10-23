@@ -2,6 +2,24 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-10-23
+
+### 新增
+
+- **前端拆分**：客户端页面（`/`）与主机控制台（`/host`）分离，共用一套商业风格样式。
+- **房间密码**：客户端必须输入正确密码才能接入；会话 Cookie 有效期 12 小时，刷新免重复输入。
+- **管理密码**：主机控制台独立登录，用于修改房间密码、启停共享。
+- **密码持久化**：首次运行随机生成房间密码（6 位）与管理密码（12 位），保存到 `%LOCALAPPDATA%\sync-audio\settings.json`，并支持 `ROOM_PASSWORD` / `ADMIN_PASSWORD` 覆盖。
+- **改密踢人**：管理员修改房间密码后，所有已加入设备立即断开并需要重新输入。
+- **管理 API**：`/api/join`、`/api/admin/login`、`/api/admin/settings`、`/api/admin/share`、`/api/session`。
+
+### 变更
+
+- 客户端界面精简为「时钟偏移 + 手动延迟」，移除输出设备选择、试听、缓冲/信号等调试项。
+- WebSocket 未授权连接以 `4001` 关闭。
+- `/upload`、`/play`、`/status` 需要管理员会话。
+- 默认输出音量拉满。
+
 ## [0.1.0] - 2026-10-23
 
 首个可用版本。

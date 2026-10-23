@@ -353,6 +353,7 @@ export function createSyncSocket({ url, onBlock, onStatus = () => {}, reconnectD
       clearTimeout(syncFallbackTimer);
       syncFallbackTimer = null;
       syncPending.clear();
+      if (event.code === 4001) emit({ state: 'unauthorized' });
       emit({ state: 'closed', code: event.code });
       if (!closedByUser) scheduleReconnect();
     });

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>SyncAudio · 主机控制台</title>
+  <meta name="theme-color" content="#f5f7fb" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232f6bff'/%3E%3Cg stroke='white' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 10v4M10 7v10M14 5v14M18 8v8'/%3E%3C/g%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+            <path d="M5 10v4M9 7v10M13 5v14M17 8v8" />
+          </svg>
+        </span>
+        <div class="brand-text">
+          <strong>SyncAudio</strong>
+          <span>主机控制台</span>
+        </div>
+      </div>
+      <span class="pill" id="status-pill" data-state="idle">
+        <i></i><span id="status-text">未登录</span>
+      </span>
+    </header>
+
+    <main class="stage stage-top">
+      <section class="card auth-card" id="login" hidden>
+        <h1>主机控制台</h1>
+        <p class="sub">输入管理密码，查看运行状态并修改房间设置。</p>
+
+        <form class="form" id="login-form">
+          <label class="field">
+            <span>管理密码</span>
+            <input
+              id="admin-password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="请输入管理密码"
+            />
+          </label>
+          <p class="error" id="login-error" hidden></p>
+          <button class="btn primary" id="login-button" type="submit">登录控制台</button>
+        </form>
+
+        <p class="hint">管理密码在服务端启动日志中打印，也可用环境变量 ADMIN_PASSWORD 指定。</p>
+      </section>
+
+      <section class="panel" id="panel" hidden>
+        <div class="cards">
+          <article class="card">
+            <h2>运行状态</h2>
+            <dl class="kv">
+              <div>
+                <dt>采集设备</dt>
+                <dd id="device">—</dd>
+              </div>
+              <div>
+                <dt>在线设备</dt>
+                <dd id="clients">0</dd>
+              </div>
+              <div>
+                <dt>共享状态</dt>
+                <dd id="sharing">—</dd>
+              </div>
+            </dl>
+            <div class="actions">
+              <button class="btn primary" id="share-toggle" type="button">停止共享</button>
+              <button class="btn ghost" id="refresh" type="button">刷新</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2>房间设置</h2>
+            <label class="field">
+              <span>房间密码</span>
+              <input id="new-room-password" type="text" autocomplete="off" placeholder="4–32 个字符" />
+            </label>
+            <p class="hint">修改后，已加入的设备会被断开，需要输入新密码重新加入。</p>
+            <p class="error" id="settings-error" hidden></p>
+            <p class="ok" id="settings-ok" hidden>已保存</p>
+            <div class="actions">
+              <button class="btn primary" id="save-password" type="button">保存密码</button>
+              <button class="btn ghost" id="logout" type="button">退出登录</button>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">SyncAudio · 主机控制台</footer>
+  </div>
+
+  <script type="module" src="/js/host.js"></script>
+</body>
+</html>

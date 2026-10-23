@@ -53,7 +53,7 @@ const MAX_SCHEDULE_AHEAD_S = 0.5;
 /** 最小起播提前量，避免 when 落在过去 */
 const MIN_SCHEDULE_AHEAD_S = 0.005;
 
-const OUTPUT_GAIN = 0.9;
+const OUTPUT_GAIN = 1;
 
 function getAudioContextCtor() {
   return window.AudioContext || window.webkitAudioContext;
