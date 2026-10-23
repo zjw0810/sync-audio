@@ -103,6 +103,7 @@ class Mp3Decoder extends EventEmitter {
     super();
     this.filePath = path.resolve(filePath);
     this.command = options.command || process.env.FFMPEG_PATH || DEFAULT_COMMAND;
+    this.startAtMs = Math.max(0, Number(options.startAtMs) || 0);
     this.child = null;
     this.stderr = '';
     this.exitInfo = null;
@@ -113,9 +114,13 @@ class Mp3Decoder extends EventEmitter {
     });
   }
 
-  /** 固定解码参数，顺序不可改。 */
+  /** 固定解码参数；从暂停位置续播时才在 -i 前加 -ss。 */
   get args() {
-    return [
+    const args = [];
+    if (this.startAtMs > 0) {
+      args.push('-ss', String(this.startAtMs / 1000));
+    }
+    args.push(
       '-i',
       this.filePath,
       '-f',
@@ -125,7 +130,8 @@ class Mp3Decoder extends EventEmitter {
       '-ac',
       String(CHANNELS),
       '-',
-    ];
+    );
+    return args;
   }
 
   get stdout() {

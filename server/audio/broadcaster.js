@@ -162,9 +162,9 @@ class Broadcaster extends EventEmitter {
     return this.wss.clients.size;
   }
 
-  /** 播放一个 MP3 文件；等到第一块送出后返回。 */
-  async play(filePath, filename) {
-    const source = new Mp3Decoder(filePath);
+  /** 播放一个 MP3 文件；等到第一块送出后返回。options.startAtMs 用于暂停后续播。 */
+  async play(filePath, filename, options = {}) {
+    const source = new Mp3Decoder(filePath, options);
     return this.startSource(source, { label: filename, kind: 'file' });
   }
 

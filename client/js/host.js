@@ -25,11 +25,16 @@ const els = {
   nextTrack: document.getElementById('next-track'),
   uploadTrack: document.getElementById('upload-track'),
   trackFile: document.getElementById('track-file'),
+  sourceSystem: document.getElementById('source-system'),
+  sourceLibrary: document.getElementById('source-library'),
+  pauseToggle: document.getElementById('pause-toggle'),
 };
 
 let sharing = false;
 let pollTimer = null;
 let passwordLoaded = false;
+let pausedState = false;
+let currentSource = 'system';
 
 function setStatus(kind, text) {
   els.pill.dataset.state = kind;
@@ -91,15 +96,51 @@ async function loadNowPlaying() {
   const data = await request('/api/admin/now-playing');
   if (!data) return;
 
-  if (data.mode === 'file' && data.filename) {
+  pausedState = Boolean(data.paused);
+  currentSource = data.source === 'library' ? 'library' : 'system';
+
+  els.sourceSystem.classList.toggle('active', currentSource === 'system');
+  els.sourceLibrary.classList.toggle('active', currentSource === 'library');
+  els.pauseToggle.textContent = pausedState ? '继续' : '暂停';
+
+  if (data.filename) {
     els.trackName.textContent = data.filename;
-    els.trackMeta.textContent = `第 ${data.index + 1} / ${data.total} 首`;
-  } else if (data.mode === 'system') {
-    els.trackName.textContent = '本机声音';
-    els.trackMeta.textContent = data.total ? `曲库 ${data.total} 首` : '曲库为空，可上传曲目';
   } else {
-    els.trackName.textContent = '未播放';
+    els.trackName.textContent = data.mode === 'idle' ? '未播放' : '本机声音';
+  }
+
+  if (data.paused) {
+    els.trackMeta.textContent = data.filename
+      ? `已暂停 · 第 ${data.index + 1} / ${data.total} 首`
+      : '已暂停 · 本机声音';
+  } else if (data.mode === 'file' && data.filename) {
+    els.trackMeta.textContent = `第 ${data.index + 1} / ${data.total} 首`;
+  } else {
     els.trackMeta.textContent = data.total ? `曲库 ${data.total} 首` : '曲库为空，可上传曲目';
+  }
+}
+
+async function switchSource(source) {
+  try {
+    await request('/api/admin/player/source', {
+      method: 'POST',
+      body: JSON.stringify({ source }),
+    });
+    await loadNowPlaying();
+  } catch (err) {
+    els.trackMeta.textContent = err.message;
+  }
+}
+
+async function togglePause() {
+  try {
+    await request('/api/admin/player/pause', {
+      method: 'POST',
+      body: JSON.stringify({ paused: !pausedState }),
+    });
+    await loadNowPlaying();
+  } catch (err) {
+    els.trackMeta.textContent = err.message;
   }
 }
 
@@ -271,6 +312,18 @@ els.prevTrack.addEventListener('click', () => {
 
 els.nextTrack.addEventListener('click', () => {
   skip('next').catch((err) => console.error(err));
+});
+
+els.sourceSystem.addEventListener('click', () => {
+  switchSource('system').catch((err) => console.error(err));
+});
+
+els.sourceLibrary.addEventListener('click', () => {
+  switchSource('library').catch((err) => console.error(err));
+});
+
+els.pauseToggle.addEventListener('click', () => {
+  togglePause().catch((err) => console.error(err));
 });
 
 els.uploadTrack.addEventListener('click', () => {

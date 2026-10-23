@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-10-23
+
+### 新增
+
+- **音源切换**：控制台在「本机声音」与「曲库」之间切换，旧音源自动停止。
+- **暂停 / 继续**：支持暂停本机声音或文件播放；文件续播时记录块位置并用 `-ss` 从原位置继续。
+- **接口**：`POST /api/admin/player/pause`、`POST /api/admin/player/source`；`now-playing` 增加 `source`、`paused`。
+
 ## [0.3.0] - 2026-10-23
 
 ### 新增

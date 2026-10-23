@@ -179,15 +179,32 @@ function listTracks() {
   }
 }
 
+let playerSource = 'system'; // 'system' | 'library'
+let playerPaused = false;
+let pausedFile = null;
+let pausedPositionMs = 0;
+
 function nowPlaying() {
   const tracks = listTracks();
-  const isFile = broadcaster.sourceKind === 'file';
-  const index = isFile ? tracks.indexOf(broadcaster.filename) : -1;
+  const file = playerPaused
+    ? pausedFile
+    : broadcaster.sourceKind === 'file'
+      ? broadcaster.filename
+      : null;
+  const mode = playerPaused
+    ? 'paused'
+    : broadcaster.playing
+      ? broadcaster.sourceKind === 'file'
+        ? 'file'
+        : 'system'
+      : 'idle';
 
   return {
-    mode: isFile ? 'file' : broadcaster.playing ? 'system' : 'idle',
-    filename: isFile ? broadcaster.filename : null,
-    index,
+    mode,
+    source: playerSource,
+    paused: playerPaused,
+    filename: file,
+    index: file ? tracks.indexOf(file) : -1,
     total: tracks.length,
     playing: broadcaster.playing,
   };
@@ -212,6 +229,9 @@ async function playAdjacent(direction) {
 
   const filename = tracks[next];
   await broadcaster.play(path.join(UPLOAD_DIR, filename), filename);
+  playerSource = 'library';
+  playerPaused = false;
+  pausedFile = null;
   log('PLAY', `切换曲目 -> ${filename}（${next + 1}/${tracks.length}）`);
   return { filename, index: next, total: tracks.length };
 }
@@ -807,6 +827,9 @@ async function handlePlay(req, res) {
   const requestedAt = Date.now();
   try {
     await broadcaster.play(target.filePath, target.name);
+    playerSource = 'library';
+    playerPaused = false;
+    pausedFile = null;
     log(
       'PLAY',
       `开始播放 ${target.name}（${formatBytes(stat.size)}），首块 ${Date.now() - requestedAt}ms 内送出，在线客户端 ${wss.clients.size} 个`,
@@ -932,6 +955,74 @@ async function handleApi(req, res, pathname) {
     } catch (err) {
       sendJson(res, err instanceof HttpError ? err.statusCode : 500, { error: err.message });
     }
+    return;
+  }
+
+  if (pathname === '/api/admin/player/pause') {
+    if (!requireAdmin(req, res)) return;
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
+      return;
+    }
+
+    const body = await readJsonBody(req).catch(() => ({}));
+    const wantPaused = typeof body.paused === 'boolean' ? body.paused : !playerPaused;
+
+    if (wantPaused && !playerPaused) {
+      if (broadcaster.playing) {
+        if (broadcaster.sourceKind === 'file') {
+          pausedFile = broadcaster.filename;
+          pausedPositionMs = Math.max(0, (broadcaster.seq + 1) * 20);
+        } else {
+          pausedFile = null;
+        }
+        await broadcaster.stop('暂停');
+      }
+      playerPaused = true;
+      log('PLAY', '已暂停');
+    } else if (!wantPaused && playerPaused) {
+      playerPaused = false;
+      if (playerSource === 'library' && pausedFile) {
+        await broadcaster.play(path.join(UPLOAD_DIR, pausedFile), pausedFile, {
+          startAtMs: pausedPositionMs,
+        });
+        log('PLAY', `继续播放 ${pausedFile}（从 ${(pausedPositionMs / 1000).toFixed(1)}s）`);
+      } else {
+        await startSystemShare('resume');
+      }
+    }
+
+    sendJson(res, 200, nowPlaying());
+    return;
+  }
+
+  if (pathname === '/api/admin/player/source') {
+    if (!requireAdmin(req, res)) return;
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: '仅支持 POST' }, { Allow: 'POST' });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    if (body.source === 'system') {
+      playerPaused = false;
+      pausedFile = null;
+      await startSystemShare('manual');
+    } else if (body.source === 'library') {
+      if (listTracks().length === 0) {
+        sendJson(res, 404, { error: '曲库为空，请先上传音乐' });
+        return;
+      }
+      if (!(broadcaster.playing && broadcaster.sourceKind === 'file')) {
+        await playAdjacent(1);
+      }
+      playerPaused = false;
+    } else {
+      sendJson(res, 400, { error: 'source 只能是 system 或 library' });
+      return;
+    }
+
+    sendJson(res, 200, nowPlaying());
     return;
   }
 
@@ -1113,6 +1204,9 @@ async function startSystemShare(reason = 'startup') {
   try {
     await broadcaster.playSystem();
     shareAttempts = 0;
+    playerSource = 'system';
+    playerPaused = false;
+    pausedFile = null;
     log('SHARE', `已开始共享本机声音（${reason}）`);
   } catch (err) {
     shareAttempts += 1;

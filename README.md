@@ -18,6 +18,8 @@
 - **管理密码**：`/host` 控制台独立鉴权，房间密码与共享开关只有管理员能改。
 - **MP3 播放**：上传后由 FFmpeg 流式解码为 PCM，按实时节拍广播。
 - **曲目控制**：控制台显示当前曲名与序号，支持上一首/下一首、上传即播，播完自动切下一首。
+- **音源切换**：控制台可在「本机声音」与「曲库」之间切换，切换时自动停掉旧音源。
+- **暂停 / 继续**：暂停本机声音或文件播放；文件续播时用 `-ss` 从暂停位置继续。
 - **时钟同步**：5 次握手取中位数，之后每 30 秒用 RTT 最小样本渐进重校，抵消晶振漂移。
 - **精确排程**：20ms 块 + `scheduledTime`，局域网内多设备对齐在毫秒级。
 - **自适应抖动缓冲**：按丢块情况自动调整排程提前量，公网抖动时自动加深缓冲。
@@ -132,6 +134,8 @@ curl.exe -b cookies.txt -X POST -H "Content-Type: application/json" -d '{"filena
 | `GET` | `/api/admin/now-playing` | 管理员 | 当前曲目、序号、总数、模式（file/system/idle） |
 | `POST` | `/api/admin/player/next` | 管理员 | 下一首（当前为本机声音时从第一首开始） |
 | `POST` | `/api/admin/player/prev` | 管理员 | 上一首（当前为本机声音时从最后一首开始） |
+| `POST` | `/api/admin/player/pause` | 管理员 | `{"paused":true|false}`，省略则切换 |
+| `POST` | `/api/admin/player/source` | 管理员 | `{"source":"system"|"library"}` 切换音源 |
 | `POST` | `/upload` | 管理员 | multipart 字段 `file`，返回 `{"filename":"..."}` |
 | `POST` | `/play` | 管理员 | JSON `{"filename":"..."}` |
 | `GET` | `/status` | 管理员 | `{sharing, kind, device, clients, level, ffmpeg}` |
