@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-10-23
+
+### 修复
+
+- **PCM32 设备下的噪声**：采集器此前一律按 32 位浮点解析混音格式，遇到 32 位 PCM 的声卡（如部分 USB 耳机）会输出噪声。现在按 WAVEFORMATEXTENSIBLE 的 SubFormat 判断 float32 / PCM32 / PCM16 分别转换，未知格式输出静音。
+- `--info` 增加 `float` 字段，便于确认采集格式。
+
 ## [0.2.0] - 2026-10-23
 
 ### 新增

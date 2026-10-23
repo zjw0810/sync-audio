@@ -361,10 +361,27 @@ static class Program
         if (hr != 0) return 4;
         var wfx = (WAVEFORMATEX)Marshal.PtrToStructure(formatPtr, typeof(WAVEFORMATEX));
 
+        // 共享模式混音格式可能是 32 位浮点，也可能是 32/16 位 PCM（取决于声卡驱动）。
+        // 之前一律按 float 解析，遇到 PCM32 的设备就会得到噪声。
+        bool isFloat = false;
+        int bits = wfx.wBitsPerSample;
+        if (wfx.wFormatTag == 0xFFFE && wfx.cbSize >= 22)
+        {
+            byte[] sub = new byte[16];
+            Marshal.Copy(new IntPtr(formatPtr.ToInt64() + 24), sub, 0, 16);
+            // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT = 00000003-0000-0010-8000-00aa00389b71
+            isFloat = sub[0] == 0x03 && sub[1] == 0x00 && sub[2] == 0x00 && sub[3] == 0x00
+                && sub[4] == 0x00 && sub[5] == 0x00;
+        }
+        else if (wfx.wFormatTag == 3)
+        {
+            isFloat = true;
+        }
+
         if (info)
         {
             string safeName = deviceName.Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"");
-            Console.Write("{\\"rate\\":" + wfx.nSamplesPerSec + ",\\"channels\\":" + wfx.nChannels + ",\\"bits\\":" + wfx.wBitsPerSample + ",\\"tag\\":" + wfx.wFormatTag + ",\\"name\\":\\"" + safeName + "\\"}");
+            Console.Write("{\\"rate\\":" + wfx.nSamplesPerSec + ",\\"channels\\":" + wfx.nChannels + ",\\"bits\\":" + wfx.wBitsPerSample + ",\\"tag\\":" + wfx.wFormatTag + ",\\"float\\":" + (isFloat ? "true" : "false") + ",\\"name\\":\\"" + safeName + "\\"}");
             return 0;
         }
 
@@ -413,9 +430,32 @@ static class Program
             {
                 Array.Clear(floats, 0, sampleCount);
             }
-            else
+            else if (isFloat && bits == 32)
             {
                 Marshal.Copy(data, floats, 0, sampleCount);
+            }
+            else if (bits == 32)
+            {
+                byte[] raw32 = new byte[sampleCount * 4];
+                Marshal.Copy(data, raw32, 0, raw32.Length);
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    floats[i] = BitConverter.ToInt32(raw32, i * 4) / 2147483648f;
+                }
+            }
+            else if (bits == 16)
+            {
+                byte[] raw16 = new byte[sampleCount * 2];
+                Marshal.Copy(data, raw16, 0, raw16.Length);
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    floats[i] = BitConverter.ToInt16(raw16, i * 2) / 32768f;
+                }
+            }
+            else
+            {
+                // 未知格式（24 位等）先静音，避免输出噪声
+                Array.Clear(floats, 0, sampleCount);
             }
 
             capture.ReleaseBuffer(frames);
