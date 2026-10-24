@@ -151,6 +151,7 @@ class Broadcaster extends EventEmitter {
     this.deviceName = null;
     this.seq = 0;
     this.startedAt = 0;
+    this.driftRatio = 1;
 
     this._token = null;
     this._decoder = null;
@@ -383,6 +384,7 @@ class Broadcaster extends EventEmitter {
 
           if (!this._lastRatioLog || Math.abs(this._lastRatioLog - resampler.ratio) > 0.0002) {
             this._lastRatioLog = resampler.ratio;
+            this.driftRatio = resampler.ratio;
             this.log(
               'BROADCAST',
               `采样时钟补偿 ${resampler.ratio.toFixed(5)}×（约 ${Math.round(SAMPLE_RATE / resampler.ratio)} 样本/秒），积压 ${resampler.backlogMs().toFixed(0)}ms`,

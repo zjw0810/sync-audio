@@ -88,6 +88,9 @@ async function loadSettings() {
 
   if (!passwordLoaded) {
     els.newPassword.value = data.roomPassword || '';
+    els.newPassword.placeholder = data.roomPassword
+      ? '4–32 个字符'
+      : '已设置（不可回显），输入新密码以重置';
     passwordLoaded = true;
   }
 }
@@ -247,12 +250,20 @@ async function savePassword() {
   els.settingsError.hidden = true;
   els.settingsOk.hidden = true;
 
+  const next = els.newPassword.value.trim();
+  if (!next) {
+    els.settingsError.textContent = '请输入新的房间密码';
+    els.settingsError.hidden = false;
+    return;
+  }
+
   try {
     await request('/api/admin/settings', {
       method: 'POST',
-      body: JSON.stringify({ roomPassword: els.newPassword.value.trim() }),
+      body: JSON.stringify({ roomPassword: next }),
     });
     els.settingsOk.hidden = false;
+    els.newPassword.value = '';
     setTimeout(() => {
       els.settingsOk.hidden = true;
     }, 2500);

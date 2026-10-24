@@ -2,6 +2,23 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] - 2026-10-24
+
+### 新增
+
+- **单元测试**：30 个 `node:test` 用例，覆盖时钟公式、重采样、漂移补偿、播放器暂停位置、鉴权迁移/限流、上传解析、度量渲染；`npm test` 一键运行。
+- **端到端脚本**：`npm run test:e2e` 启动临时服务端与两个无头浏览器客户端，输出跨端 offset / residual / RTT / buffer / late 与 `/metrics` 校验。
+- **度量**：`GET /metrics` 输出 Prometheus 文本；客户端每 5 秒上报缓冲、迟到块、欠载；`/status` 返回快照。
+- **架构决策记录**：`docs/adr/` 四篇（20ms 块、预缓冲、双通道、鉴权）。
+- **CI**：GitHub Actions 在 Node 20/22 上跑单元测试。
+
+### 变更
+
+- **服务端模块拆分**：`index.js` 只做装配，拆出 `config / logger / auth / metrics / player / capture / ws / http/`；新增 `lib/resampler.js`。
+- **安全**：密码改为 scrypt 哈希（旧明文自动迁移）、登录限流（5 次失败封 5 分钟）、会话持久化到 `sessions.json`、支持 `TLS_CERT/TLS_KEY` 直接 HTTPS。
+- WebSocket 未授权连接仍以 4001 关闭；新增 `stats` 上行消息。
+- 新增 `deploy/Caddyfile` 公网反代示例。
+
 ## [0.4.0] - 2026-10-23
 
 ### 新增

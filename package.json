@@ -1,11 +1,13 @@
 {
   "name": "sync-audio",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "局域网多设备同步播放本地音频（HTTP + WebSocket + PCM 广播）",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node --test \"tests/unit/*.test.mjs\"",
+    "test:e2e": "node tests/e2e/sync.mjs"
   },
   "engines": {
     "node": ">=18"
@@ -14,5 +16,8 @@
     "opusscript": "^0.1.1",
     "werift": "^0.25.1",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.16.0"
   }
 }

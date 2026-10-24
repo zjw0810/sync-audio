@@ -12,6 +12,7 @@
 
 const { RTCPeerConnection, MediaStreamTrack, RtpPacket, RtpHeader } = require('werift');
 const OpusScript = require('opusscript');
+const { LinearResampler } = require('./lib/resampler');
 
 const OPUS_RATE = 48000;
 const FRAME_SAMPLES = 960; // 20ms
@@ -24,8 +25,11 @@ class RtcHub {
     this.logError = logError;
     this.peers = new Map();
     this.encoder = new OpusScript(OPUS_RATE, 1, OpusScript.Application.AUDIO);
-    this.samples = new Int16Array(0);
-    this.pos = 0;
+    this.resampler = new LinearResampler({
+      inputRate: 44100,
+      outputRate: OPUS_RATE,
+      frameSize: FRAME_SAMPLES,
+    });
   }
 
   get activeCount() {
@@ -111,32 +115,9 @@ class RtcHub {
   pushBlock(block) {
     if (this.peers.size === 0) return;
 
-    const count = block.length >> 1;
-    const start = this.samples.length;
-    const next = new Int16Array(start + count);
-    next.set(this.samples, 0);
-    for (let i = 0; i < count; i += 1) next[start + i] = block.readInt16LE(i * 2);
-    this.samples = next;
-
-    while (this.samples.length - this.pos > FRAME_SAMPLES * STEP + 2) {
-      const frame = new Int16Array(FRAME_SAMPLES);
-      let pos = this.pos;
-      for (let i = 0; i < FRAME_SAMPLES; i += 1) {
-        const index = Math.floor(pos);
-        const frac = pos - index;
-        const a = this.samples[index];
-        const b = this.samples[index + 1] === undefined ? a : this.samples[index + 1];
-        frame[i] = a + (b - a) * frac;
-        pos += STEP;
-      }
-      this.pos = pos;
-
-      const drop = Math.floor(this.pos) - 1;
-      if (drop > 4096) {
-        this.samples = this.samples.slice(drop);
-        this.pos -= drop;
-      }
-
+    this.resampler.push(block);
+    let frame;
+    while ((frame = this.resampler.readFrame())) {
       this.broadcastFrame(frame);
     }
   }

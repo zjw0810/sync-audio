@@ -9,6 +9,8 @@
  * scheduler 直接 import 这个函数，不再自己维护第二份时间基准。
  */
 
+import { median, computeOffset, computeRtt, bestByRtt, smoothOffset } from './clock.js';
+
 const SYNC_ROUNDS = 5;
 const SYNC_INTERVAL_MS = 200;
 const RESYNC_ROUNDS = 3;
@@ -23,13 +25,6 @@ export function estimatedServerTime() {
 
 export function getServerOffset() {
   return serverOffsetMs;
-}
-
-function median(values) {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 export function createSyncSocket({ url, onBlock, onStatus = () => {}, reconnectDelayMs = 2000 }) {
@@ -141,8 +136,8 @@ export function createSyncSocket({ url, onBlock, onStatus = () => {}, reconnectD
     const t3 = Date.now();
     const t2 = message.t2;
 
-    const offset = (t2 - t1 + (t2 - t3)) / 2;
-    const rtt = t3 - t1;
+    const offset = computeOffset(t1, message.t2, t3);
+    const rtt = computeRtt(t1, t3);
 
     syncSamples.push(offset);
     syncRtts.push(rtt);
@@ -178,20 +173,16 @@ export function createSyncSocket({ url, onBlock, onStatus = () => {}, reconnectD
     // 重同步：只在这一轮收齐后，用 RTT 最小的样本做渐进修正
     if (syncSamples.length < syncTarget) return;
 
-    let bestIndex = 0;
-    for (let i = 1; i < syncSamples.length; i += 1) {
-      if (syncRtts[i] < syncRtts[bestIndex]) bestIndex = i;
-    }
-    const best = syncSamples[bestIndex];
-    const diff = best - serverOffsetMs;
-    serverOffsetMs = Math.abs(diff) > 100 ? best : serverOffsetMs + diff * 0.3;
+    const best = bestByRtt(syncSamples, syncRtts);
+    if (!best) return;
+    serverOffsetMs = smoothOffset(serverOffsetMs, best.sample);
 
     emit({
       state: 'clock',
       offset: serverOffsetMs,
       samples: syncTarget,
       rounds: syncTarget,
-      rtt: syncRtts[bestIndex],
+      rtt: best.rtt,
       resync: true,
     });
   }

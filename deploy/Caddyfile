@@ -1,0 +1,26 @@
+# 公网部署示例：Caddy 自动 HTTPS
+#
+# 1. 把域名解析到服务器；
+# 2. 安装 Caddy 后，把本文件放到 /etc/caddy/Caddyfile（或项目目录）；
+# 3. caddy run --config Caddyfile
+#
+# Node 服务继续监听 127.0.0.1:3000，不需要改代码：
+# 页面会按 location.protocol 自动使用 wss://。
+
+audio.example.com {
+	encode gzip
+
+	# WebSocket 与普通 HTTP 共用同一个 upstream，Caddy 会自动升级
+	reverse_proxy 127.0.0.1:3000 {
+		# 公网弱网下可以适当拉长超时
+		transport http {
+			read_timeout 0
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+}

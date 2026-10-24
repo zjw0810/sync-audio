@@ -1,7 +1,7 @@
 'use strict';
 
 import { SyncScheduler } from './scheduler.js';
-import { createSyncSocket } from './ws.js';
+import { createSyncSocket, estimatedServerTime, getServerOffset } from './ws.js';
 
 const els = {
   pill: document.getElementById('status-pill'),
@@ -30,6 +30,12 @@ let authed = false;
 let clockSynced = false;
 let manualTimer = null;
 let manualOffset = loadManualOffset();
+let lastStatsSentAt = 0;
+
+/** 端到端脚本和排障用的调试快照 */
+function updateDebug(partial) {
+  window.__syncDebug = { ...(window.__syncDebug || {}), ...partial, at: Date.now() };
+}
 
 function loadManualOffset() {
   try {
@@ -115,6 +121,7 @@ function handleSocketStatus(event) {
 
   if (event.state === 'synced') {
     clockSynced = true;
+    updateDebug({ synced: true, offset: event.offset, rtt: event.rtt });
     renderOffsetDetail(event);
     if (scheduler && scheduler.scheduledCount === 0) scheduler.resetTimeline();
     setStatus('live', '同步播放中');
@@ -122,11 +129,17 @@ function handleSocketStatus(event) {
   }
 
   if (event.state === 'clock') {
+    updateDebug({ offset: event.offset, rtt: event.rtt, samples: event.samples });
     renderOffsetDetail(event);
     return;
   }
 
   if (event.state === 'heartbeat') {
+    updateDebug({
+      residual: event.residual,
+      offset: getServerOffset(),
+      estimatedServerTime: estimatedServerTime(),
+    });
     renderResidual(event.residual);
     return;
   }
@@ -151,7 +164,26 @@ async function join() {
 
   try {
     scheduler = new SyncScheduler({
-      onStats: () => {},
+      onStats: (stats) => {
+        updateDebug({
+          bufferMs: stats.bufferMs,
+          late: stats.late,
+          gaps: stats.gaps,
+          leadMs: stats.leadMs,
+          outputLatencyMs: stats.outputLatencyMs,
+        });
+        const now = Date.now();
+        if (socket && joined && now - lastStatsSentAt > 5000) {
+          lastStatsSentAt = now;
+          socket.send({
+            type: 'stats',
+            bufferMs: stats.bufferMs,
+            late: stats.late,
+            underruns: stats.gaps,
+            scheduleErrorMs: 0,
+          });
+        }
+      },
       onLog: (message) => console.info('[sync]', message),
     });
     // AudioContext 必须在点击手势里创建

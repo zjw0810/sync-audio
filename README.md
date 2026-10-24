@@ -163,46 +163,148 @@ curl.exe -b cookies.txt -X POST -H "Content-Type: application/json" -d '{"filena
 
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `ROOM_PASSWORD` | 随机 6 位 | 房间密码 |
+| `PORT` | `3000` | 监听端口 |
+| `ROOM_PASSWORD` | 随机 6 位 | 房间密码（优先级高于 `settings.json`） |
 | `ADMIN_PASSWORD` | 随机 12 位 | 管理密码 |
+| `TLS_CERT` / `TLS_KEY` | 空 | 同时提供则直接以 HTTPS 启动 |
 | `FFMPEG_PATH` | `ffmpeg` | FFmpeg 可执行文件路径 |
 | `SYNC_LIVE_PREBUFFER_MS` | `150` | 本机声音预缓冲；公网建议 300–500 |
+| `SYNC_SETTINGS_DIR` | `%LOCALAPPDATA%\sync-audio` | 密码/会话存放目录（测试用） |
+| `SYNC_DISABLE_CAPTURE` | 空 | 设为 `1` 时跳过本机声音采集（CI/测试用） |
 
 ## 目录结构
 
 ```
 server/
-  index.js              HTTP + WebSocket + 鉴权 + 路由 + 心跳
-  rtc.js                WebRTC / Opus 出口
-  audio/decoder.js      MP3 解码 + WASAPI 环回采集（内嵌 C# 采集器）
+  index.js              装配层：创建依赖、接线、启动/关闭
+  config.js             路径、端口、超时、TLS 配置
+  logger.js             统一日志格式
+  auth.js               scrypt 密码、会话、登录限流
+  metrics.js            /metrics 指标
+  player.js             音源/暂停/曲目状态机
+  capture.js            本机声音采集生命周期与设备跟随
+  ws.js                 WebSocket 鉴权、NTP、心跳、客户端统计
+  rtc.js                WebRTC / Opus 出口（复用 lib/resampler）
+  lib/resampler.js      44.1k → 48k 线性重采样
+  http/
+    server.js           路由与 TLS/HTTP server
+    body.js             JSON/文本响应、请求体读取
+    static.js           静态文件（目录穿越防护）
+    upload.js           流式 multipart
+    api.js              登录、设置、播放控制、/status、/metrics
+  audio/decoder.js      MP3 解码 + WASAPI 环回采集（内嵌 C#）
   audio/broadcaster.js  20ms 分块、节拍、广播、时钟补偿
 client/
   index.html            客户端：密码加入 + 时钟偏移 + 手动延迟
-  host.html             主机控制台：状态 / 共享开关 / 房间密码
+  host.html             主机控制台：状态 / 音源 / 曲目 / 房间密码
   css/app.css           共用样式
-  js/ws.js              连接、配对、NTP 校时、RTC 信令
+  js/clock.js           时钟同步纯函数（可单测）
+  js/ws.js              连接、配对、NTP、RTC 信令
   js/scheduler.js       缓冲队列、排程、输出延迟补偿
-  js/ui.js              客户端逻辑
+  js/ui.js              客户端逻辑 + stats 上报
   js/host.js            主机控制台逻辑
+tests/
+  unit/                 30 个单测（node:test）
+  e2e/sync.mjs          两个 headless 客户端的端到端校验
+docs/adr/               架构决策记录
+deploy/Caddyfile        公网 HTTPS 反代示例
 uploads/                上传的音频
 ```
+
+## 测试与度量
+
+```powershell
+npm test           # 单元测试（node --test）
+npm run test:e2e   # 两个无头浏览器客户端，输出跨端偏差
+```
+
+单元测试覆盖：
+
+- 时钟：offset/RTT 公式、中位数、最佳样本、渐进修正；
+- 重采样：44.1k→48k 帧数、440Hz 能量保持；
+- 漂移补偿：线性插值、积压裁剪；
+- 播放器：暂停位置、续播 `-ss`、上一首/下一首、空曲库；
+- 鉴权：scrypt 迁移、会话持久化、改密踢人、限流；
+- 上传：文件名清洗、目录穿越拦截、逐字节 multipart 解析；
+- 度量：Prometheus 文本渲染、非法 stats 归零。
+
+端到端脚本会自己起一个临时服务端（默认 3101，使用临时 `settings.json`），打开两个 Edge/Chrome 页面加入房间，采集 `window.__syncDebug` 里的 offset/residual/RTT，并校验 `/metrics`：
+
+```json
+{
+  "offsetMs": { "a": -0.5, "b": -0.5 },
+  "skewMs": 0,
+  "residualMs": { "a": 0.5, "b": 0.5 },
+  "rttMs": { "a": 1, "b": 1 },
+  "bufferMs": { "a": 80, "b": 80 },
+  "late": { "a": 0, "b": 0 },
+  "metrics": { "clients": 2, "blocksTotal": 642, "driftRatio": 1.00212 }
+}
+```
+
+> 说明：同机回环下两端时钟差应当接近 0；真实跨设备偏差需要麦克风回采，见 Roadmap。
+> 默认 e2e 会关闭采集（`SYNC_DISABLE_CAPTURE=1`）以便在 CI/无声卡环境运行；想看真实缓冲与丢块，用 `E2E_CAPTURE=1 npm run test:e2e`。
+
+## 可观测性
+
+`GET /metrics`（管理员会话）输出 Prometheus 文本：
+
+```
+sync_audio_clients 2
+sync_audio_rtc_peers 0
+sync_audio_blocks_total 642
+sync_audio_drift_ratio 0.99842
+sync_audio_client_buffer_ms{client="1"} 80
+sync_audio_client_late_blocks_total{client="1"} 0
+sync_audio_client_underruns_total{client="1"} 0
+```
+
+客户端每 5 秒通过 WebSocket 上报 `bufferMs/late/underruns`，服务端按客户端 id 聚合；`/status` 也会返回 `metrics.snapshot()`。
+
+## 安全
+
+- 密码以 **scrypt**（随机盐 + 64 字节）保存，旧的明文 `settings.json` 启动时自动迁移；
+- 登录失败限流：同一 IP 10 分钟 5 次失败 → 封禁 5 分钟（429 + `Retry-After`）；
+- 会话：`HttpOnly; SameSite=Lax`，12 小时，持久化到 `sessions.json`；
+- 修改房间密码会立刻让所有 room 会话失效并断开对应 WebSocket；
+- 支持 `TLS_CERT` / `TLS_KEY` 直接起 HTTPS，或参考 [deploy/Caddyfile](deploy/Caddyfile) 用 Caddy 自动签发证书。
+
+## 实测数据（本机，2026-10-24）
+
+| 项目 | 结果 |
+|---|---|
+| 单元测试 | 30 个全部通过 |
+| 两端 headless 时钟偏差 | 中位 0.0–0.5ms（同机回环） |
+| 心跳残差 | ±0.5ms |
+| 客户端缓冲 | 80ms（LAN） |
+| 迟到块 | 0（5 分钟采样） |
+| 1kHz 采集纯度 | tone/rms 1.38（理论 1.41） |
+| 采样时钟补偿 | 0.9984–1.0021（随设备时钟变化） |
+
+## 架构决策记录
+
+- [ADR 0001：为什么是 20ms 块](docs/adr/0001-20ms-blocks.md)
+- [ADR 0002：预缓冲 150ms / 300ms](docs/adr/0002-prebuffer.md)
+- [ADR 0003：PCM + WebRTC 双通道](docs/adr/0003-hybrid-transport.md)
+- [ADR 0004：密码哈希、会话与限流](docs/adr/0004-auth.md)
 
 ## 已知限制
 
 - 系统声音采集仅支持 Windows。
-- 没有 TLS：公网部署请在前面加 Nginx/Caddy 并启用 HTTPS/WSS。
-- 密码只有会话级防护，未做失败次数限制；公网部署建议再加一层反向代理鉴权。
+- 房间密码哈希后不可回显：忘记只能在控制台重置；管理密码只能靠环境变量或删除 `settings.json`。
+- 没有 CSRF token，状态修改接口依赖 `SameSite=Lax` 与同源；公网部署建议再加反向代理鉴权。
 - 页面切到后台后定时器被节流，会断流；请保持前台。
-- Safari 不暴露 `outputLatency`，iOS 需要手动补偿（滑杆值会持久化）。
+- Safari 不暴露 `outputLatency`，iOS 需要手动补偿。
 - WebRTC 模式下由浏览器 jitter buffer 决定延迟，跨设备对齐约 20–50ms（PCM 模式约 1ms）。
 - 公网部署若服务器有公网 IP 通常不需要 TURN；对称 NAT 等特殊网络仍需中继。
 
 ## Roadmap
 
-- [ ] 登录失败限流与 CSRF 防护
+- [ ] 用麦克风回采做真实的跨设备声学偏差测试
 - [ ] 多房间
 - [ ] AudioWorklet 环形缓冲，替换逐块 `AudioBufferSourceNode`
 - [ ] 非 Windows 平台的采集（macOS / Linux）
+- [ ] CSRF token 与更细的审计日志
 
 ## 参考
 
